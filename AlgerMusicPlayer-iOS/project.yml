@@ -30,25 +30,7 @@ targets:
     sources:
       - path: AlgerMusicPlayer
     info:
-      properties:
-        UIBackgroundModes:
-          - audio
-        NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        CFBundleDisplayName: AlgerMusic
-        UILaunchScreen:
-          UILaunchScreenProperties:
-            UILaunchBackgroundColor: "#0B0B0F"
-        UIApplicationSupportsIndefiniteRemotePlayback: true
+      path: AlgerMusicPlayer/Info.plist
     dependencies:
       - package: Kingfisher
         product: Kingfisher

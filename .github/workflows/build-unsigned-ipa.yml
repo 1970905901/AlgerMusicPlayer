@@ -1,0 +1,48 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ ios ]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: cd AlgerMusicPlayer-iOS && xcodegen generate
+
+      - name: Build (unsigned, no provisioning)
+        run: |
+          cd AlgerMusicPlayer-iOS
+          xcodebuild \
+            -scheme AlgerMusicPlayer \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          cd AlgerMusicPlayer-iOS
+          APP=$(find build/DerivedData -name "AlgerMusicPlayer.app" -type d | head -n 1)
+          echo "App path: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -r AlgerMusicPlayer-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlgerMusicPlayer-unsigned-ipa
+          path: AlgerMusicPlayer-iOS/AlgerMusicPlayer-unsigned.ipa
