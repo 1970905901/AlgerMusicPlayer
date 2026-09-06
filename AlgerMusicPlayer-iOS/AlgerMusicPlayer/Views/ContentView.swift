@@ -78,7 +78,10 @@ struct ContentView: View {
 
     private var iPadLayout: some View {
         NavigationSplitView {
-            List(Tab.allCases, id: \.self, selection: $selectedTab) { tab in
+            List(Tab.allCases, id: \.self, selection: Binding(
+                get: { selectedTab },
+                set: { if let t = $0 { selectedTab = t } }
+            )) { tab in
                 Label(tab.title, systemImage: tab.icon).tag(tab)
             }
             .navigationTitle("AlgerMusic")
