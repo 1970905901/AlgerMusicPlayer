@@ -43,9 +43,11 @@ open AlgerMusicPlayer.xcodeproj
 - 选择一台 iPhone/iPad 真机或模拟器，点击运行（⌘R）。
 - 真机调试需在 **Signing** 中开启 **Background Modes → Audio**（工程已默认开启）。
 
-### 3. 配置 API 服务（必须）
+### 3. API 服务（默认直连网易云）
 
-App 需要一个 `netease-cloud-music-api-alger` 实例作为后端。任选其一：
+App **默认直连网易云官方接口**（`music.163.com`，请求签名在客户端本地完成），无需自建后端即可搜索、播放、收藏。
+
+App 内 **设置 → API 服务器地址** 可覆盖默认值，填入你自己的 `netease-cloud-music-api-alger` 实例（如解锁更高音质）。可选方式如下：
 
 **方式 A：本地运行（电脑/服务器）**
 
