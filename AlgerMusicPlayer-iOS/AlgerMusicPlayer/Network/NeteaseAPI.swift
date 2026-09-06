@@ -1,4 +1,5 @@
 import Foundation
+import CommonCrypto
 
 enum APIError: LocalizedError {
     case invalidResponse
@@ -13,26 +14,68 @@ enum APIError: LocalizedError {
     }
 }
 
-/// TEMPORARY: accepts any server certificate (incl. expired/self-signed) so the
-/// app can talk to `music.alger.fun` while its SSL cert is broken. Remove once
-/// a valid certificate is deployed — this disables TLS trust verification and is
-/// insecure (MITM-prone).
-final class InsecureSessionDelegate: NSObject, URLSessionDelegate {
-    func urlSession(_ session: URLSession,
-                    didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-           let trust = challenge.protectionSpace.serverTrust {
-            completionHandler(.useCredential, URLCredential(trust: trust))
-        } else {
-            completionHandler(.performDefaultHandling, nil)
+/// Client-side NetEase Cloud Music `weapi` request signing. The official API
+/// requires AES-128-CBC encrypted `params`/`encSecKey`; historically a proxy
+/// (`netease-cloud-music-api-alger`) did this server-side. We now sign locally
+/// and talk to `music.163.com` directly, so no third-party backend is needed.
+enum NeteaseCrypto {
+    // First AES pass key (fixed by NetEase) and CBC IV.
+    private static let firstKey = "0CoJUm6Qyw8W8jud"
+    private static let iv = "0102030405060708"
+    // Per-client secretKey (16 bytes) and its precomputed encSecKey
+    // (secretKey reversed → big-endian int, then ^65537 mod n). Computed once
+    // offline; a fixed pair is what many official/third-party clients use.
+    private static let secretKey = "abcdefghijklmnop"
+    private static let encSecKey = "3177e70615c10d79eca876c985040d6a5f6af70ca834c1404edc94032f59cfff0fecf03d1d56f03d010ba66d2a931ec7519bc26fe836f9c63bcea0e40e116f07c8c57da0e0e9a5f91a4aedec564521228045c0a221417034f13eff1a07257af27859936ca73cf92eabc98491955d54ad908948f993d0b83a658e1cc95a59f246"
+
+    /// AES-128-CBC with PKCS7 padding (handled by CommonCrypto), base64 output.
+    static func aesEncrypt(_ plainText: String, key: String) -> String? {
+        guard let keyData = key.data(using: .utf8), keyData.count == 16,
+              let data = plainText.data(using: .utf8) else { return nil }
+        let ivData = Data(iv.utf8)
+        var out = Data(count: data.count + kCCBlockSizeAES128)
+        var numBytes: size_t = 0
+        let status = out.withUnsafeMutableBytes { ob in
+            data.withUnsafeBytes { db in
+                ivData.withUnsafeBytes { ib in
+                    keyData.withUnsafeBytes { kb in
+                        CCCrypt(CCOperation(kCCEncrypt), CCAlgorithm(kCCAlgorithmAES),
+                                CCOptions(kCCOptionPKCS7Padding),
+                                kb.baseAddress, kCCKeySizeAES128, ib.baseAddress,
+                                db.baseAddress, data.count,
+                                ob.baseAddress, out.count, &numBytes)
+                    }
+                }
+            }
         }
+        guard status == kCCSuccess else { return nil }
+        return out.prefix(numBytes).base64EncodedString()
+    }
+
+    /// Encrypt a JSON payload into the `params`/`encSecKey` pair NetEase expects.
+    static func encrypt(_ payload: [String: Any]) -> (params: String, encSecKey: String)? {
+        guard let json = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonStr = String(data: json, encoding: .utf8),
+              let first = aesEncrypt(jsonStr, key: firstKey),
+              let second = aesEncrypt(first, key: secretKey) else { return nil }
+        return (second, encSecKey)
+    }
+
+    /// NetEase expects the login password as an MD5 hex digest.
+    static func md5(_ s: String) -> String {
+        let data = Data(s.utf8)
+        var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
+        data.withUnsafeBytes { db in
+            digest.withUnsafeMutableBytes { mb in
+                CC_MD5(db.baseAddress, CC_LONG(data.count), mb.bindMemory(to: UInt8.self).baseAddress)
+            }
+        }
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 
-/// Thin async client over a `netease-cloud-music-api-alger` (or compatible)
-/// server. All NetEase request signing happens server-side, so we only send
-/// plain HTTP requests.
+/// Thin async client that signs and calls NetEase Cloud Music's official
+/// `weapi` endpoints directly.
 struct NeteaseAPI {
     static let shared = NeteaseAPI()
     private let session: URLSession
@@ -42,15 +85,13 @@ struct NeteaseAPI {
         cfg.httpAdditionalHeaders = ["User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X)"]
         cfg.timeoutIntervalForRequest = 25
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        self.session = URLSession(configuration: cfg,
-                                  delegate: InsecureSessionDelegate(),
-                                  delegateQueue: nil)
+        self.session = URLSession(configuration: cfg)
     }
 
     private var baseURL: String {
         get async {
             let raw = await AppSettings.shared.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            let trimmed = raw.isEmpty ? "https://music.alger.fun" : raw
+            let trimmed = raw.isEmpty ? "https://music.163.com" : raw
             return trimmed.last == "/" ? String(trimmed.dropLast()) : trimmed
         }
     }
@@ -62,23 +103,18 @@ struct NeteaseAPI {
         }
     }
 
-    private func request(_ path: String,
-                         query: [URLQueryItem] = [],
-                         method: String = "GET",
-                         form: [String: String]? = nil) async throws -> (Data, HTTPURLResponse) {
-        guard let url = URL(string: await baseURL + path)?.withQueries(query) else {
+    /// Perform a signed `weapi` POST to `path` (e.g. "/weapi/search/get").
+    private func weapi(_ path: String, _ payload: [String: Any]) async throws -> (Data, HTTPURLResponse) {
+        guard let (params, encSecKey) = NeteaseCrypto.encrypt(payload),
+              let url = URL(string: await baseURL + path) else {
             throw APIError.invalidResponse
         }
         var req = URLRequest(url: url)
-        req.httpMethod = method
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
         if let c = await cookieHeader { req.setValue(c, forHTTPHeaderField: "Cookie") }
-        if let form = form {
-            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            req.httpBody = form.map { "\($0.key)=\($0.value)" }
-                .joined(separator: "&")
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)?
-                .data(using: .utf8)
-        }
+        req.httpBody = "params=\(params)&encSecKey=\(encSecKey)".data(using: .utf8)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
         if http.statusCode >= 400 { throw APIError.invalidResponse }
@@ -100,21 +136,16 @@ struct NeteaseAPI {
     // MARK: Endpoints
 
     func searchSongs(keyword: String, limit: Int = 30, offset: Int = 0) async throws -> [Track] {
-        let (data, _) = try await request("/search", query: [
-            URLQueryItem(name: "keywords", value: keyword),
-            URLQueryItem(name: "type", value: "1"),
-            URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "offset", value: String(offset)),
+        let (data, _) = try await weapi("/weapi/search/get", [
+            "keywords": keyword, "type": 1, "limit": limit, "offset": offset, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(SearchResponse.self, from: data)
         return (dec.result?.songs ?? []).map { map($0) }
     }
 
     func searchAlbums(keyword: String, limit: Int = 30) async throws -> [AlbumBrief] {
-        let (data, _) = try await request("/search", query: [
-            URLQueryItem(name: "keywords", value: keyword),
-            URLQueryItem(name: "type", value: "10"),
-            URLQueryItem(name: "limit", value: String(limit)),
+        let (data, _) = try await weapi("/weapi/search/get", [
+            "keywords": keyword, "type": 10, "limit": limit, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(SearchResponse.self, from: data)
         return (dec.result?.albums ?? []).map {
@@ -123,10 +154,8 @@ struct NeteaseAPI {
     }
 
     func searchPlaylists(keyword: String, limit: Int = 30) async throws -> [PlaylistBrief] {
-        let (data, _) = try await request("/search", query: [
-            URLQueryItem(name: "keywords", value: keyword),
-            URLQueryItem(name: "type", value: "1000"),
-            URLQueryItem(name: "limit", value: String(limit)),
+        let (data, _) = try await weapi("/weapi/search/get", [
+            "keywords": keyword, "type": 1000, "limit": limit, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(SearchResponse.self, from: data)
         return (dec.result?.playlists ?? []).map {
@@ -137,10 +166,8 @@ struct NeteaseAPI {
     }
 
     func searchArtists(keyword: String, limit: Int = 30) async throws -> [ArtistBrief] {
-        let (data, _) = try await request("/search", query: [
-            URLQueryItem(name: "keywords", value: keyword),
-            URLQueryItem(name: "type", value: "100"),
-            URLQueryItem(name: "limit", value: String(limit)),
+        let (data, _) = try await weapi("/weapi/search/get", [
+            "keywords": keyword, "type": 100, "limit": limit, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(SearchResponse.self, from: data)
         return (dec.result?.artists ?? []).map {
@@ -149,9 +176,8 @@ struct NeteaseAPI {
     }
 
     func songURL(id: Int, level: String = "standard") async throws -> String? {
-        let (data, _) = try await request("/song/url/v1", query: [
-            URLQueryItem(name: "id", value: String(id)),
-            URLQueryItem(name: "level", value: level),
+        let (data, _) = try await weapi("/weapi/song/enhance/player/url/v1", [
+            "id": id, "level": level, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(SongURLResponse.self, from: data)
         return dec.data?.first?.url
@@ -166,13 +192,15 @@ struct NeteaseAPI {
     }
 
     func lyric(id: Int) async throws -> (String, String) {
-        let (data, _) = try await request("/lyric", query: [URLQueryItem(name: "id", value: String(id))])
+        let (data, _) = try await weapi("/weapi/song/lyric", ["id": id, "csrf_token": ""])
         let dec = try JSONDecoder().decode(LyricResponse.self, from: data)
         return (dec.lrc?.lyric ?? "", dec.tlyric?.lyric ?? "")
     }
 
     func playlistDetail(id: Int) async throws -> Playlist {
-        let (data, _) = try await request("/playlist/detail", query: [URLQueryItem(name: "id", value: String(id))])
+        let (data, _) = try await weapi("/weapi/v3/playlist/detail", [
+            "id": id, "n": 1000, "csrf_token": ""
+        ])
         let dec = try JSONDecoder().decode(PlaylistDetailResponse.self, from: data)
         guard let p = dec.playlist else { throw APIError.empty }
         let tracks = (p.tracks ?? []).map { map($0) }
@@ -181,7 +209,7 @@ struct NeteaseAPI {
     }
 
     func album(id: Int) async throws -> Album {
-        let (data, _) = try await request("/album", query: [URLQueryItem(name: "id", value: String(id))])
+        let (data, _) = try await weapi("/weapi/v1/album", ["id": id, "csrf_token": ""])
         let dec = try JSONDecoder().decode(AlbumResponse.self, from: data)
         guard let a = dec.album else { throw APIError.empty }
         let tracks = (dec.songs ?? []).map { map($0) }
@@ -190,15 +218,14 @@ struct NeteaseAPI {
     }
 
     func artistTopSongs(id: Int) async throws -> [Track] {
-        let (data, _) = try await request("/artist/top/song", query: [URLQueryItem(name: "id", value: String(id))])
+        let (data, _) = try await weapi("/weapi/artist/top/song", ["id": id, "csrf_token": ""])
         let dec = try JSONDecoder().decode(ArtistTopResponse.self, from: data)
         return (dec.songs ?? []).map { map($0) }
     }
 
     func topPlaylists(limit: Int = 30, order: String = "hot") async throws -> [PlaylistBrief] {
-        let (data, _) = try await request("/top/playlist", query: [
-            URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "order", value: order),
+        let (data, _) = try await weapi("/weapi/playlist/highquality/list", [
+            "limit": limit, "order": order, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(TopPlaylistResponse.self, from: data)
         return (dec.playlists ?? []).map {
@@ -209,8 +236,9 @@ struct NeteaseAPI {
     }
 
     func login(phone: String, password: String) async throws -> Bool {
-        let (data, resp) = try await request("/login/cellphone", method: "POST",
-                                             form: ["phone": phone, "password": password])
+        let (data, resp) = try await weapi("/weapi/login/cellphone", [
+            "phone": phone, "password": NeteaseCrypto.md5(password), "csrf_token": ""
+        ])
         if let cookie = resp.allHeaderFields["Set-Cookie"] as? String {
             if let range = cookie.range(of: "MUSIC_U=([^;]+)", options: .regularExpression) {
                 let value = String(cookie[range]).replacingOccurrences(of: "MUSIC_U=", with: "")
@@ -228,9 +256,8 @@ struct NeteaseAPI {
     }
 
     func userPlaylists(uid: Int) async throws -> [PlaylistBrief] {
-        let (data, _) = try await request("/user/playlist", query: [
-            URLQueryItem(name: "uid", value: String(uid)),
-            URLQueryItem(name: "limit", value: "100"),
+        let (data, _) = try await weapi("/weapi/user/playlist", [
+            "uid": uid, "limit": 1000, "offset": 0, "csrf_token": ""
         ])
         let dec = try JSONDecoder().decode(UserPlaylistResponse.self, from: data)
         return (dec.playlist ?? []).map {
