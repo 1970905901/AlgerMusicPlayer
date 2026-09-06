@@ -14,7 +14,7 @@ struct SettingsView: View {
                     TextField("API 服务器地址", text: $settings.apiBaseURL)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
-                    Text("指向一个 netease-cloud-music-api-alger 实例，例如 http://192.168.1.10:3000 或你的部署地址")
+                    Text("留空则直连网易云官方接口；也可填入自建的 netease-cloud-music-api-alger 实例，例如 http://192.168.1.10:3000")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Section("播放") {
