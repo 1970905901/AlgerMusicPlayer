@@ -60,7 +60,7 @@ final class PlayerManager: ObservableObject {
         do {
             let s = AVAudioSession.sharedInstance()
             try s.setCategory(.playback, mode: .default,
-                              options: [.allowAirPlay, .allowRemoteControl])
+                              options: [.allowAirPlay])
             try s.setActive(true)
         } catch {
             #if DEBUG
