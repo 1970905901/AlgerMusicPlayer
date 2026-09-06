@@ -13,6 +13,23 @@ enum APIError: LocalizedError {
     }
 }
 
+/// TEMPORARY: accepts any server certificate (incl. expired/self-signed) so the
+/// app can talk to `music.alger.fun` while its SSL cert is broken. Remove once
+/// a valid certificate is deployed — this disables TLS trust verification and is
+/// insecure (MITM-prone).
+final class InsecureSessionDelegate: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+}
+
 /// Thin async client over a `netease-cloud-music-api-alger` (or compatible)
 /// server. All NetEase request signing happens server-side, so we only send
 /// plain HTTP requests.
@@ -25,7 +42,9 @@ struct NeteaseAPI {
         cfg.httpAdditionalHeaders = ["User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X)"]
         cfg.timeoutIntervalForRequest = 25
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        self.session = URLSession(configuration: cfg)
+        self.session = URLSession(configuration: cfg,
+                                  delegate: InsecureSessionDelegate(),
+                                  delegateQueue: nil)
     }
 
     private var baseURL: String {
