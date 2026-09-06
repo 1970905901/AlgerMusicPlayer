@@ -134,6 +134,14 @@ struct NeteaseAPI {
         return dec.data?.first?.url
     }
 
+    /// Download the raw audio data for a track (used for offline playback).
+    func download(id: Int) async throws -> Data {
+        guard let urlStr = try await songURL(id: id, level: AppSettings.shared.audioQuality.rawValue),
+              let u = URL(string: urlStr) else { throw APIError.empty }
+        let (data, _) = try await session.data(from: u)
+        return data
+    }
+
     func lyric(id: Int) async throws -> (String, String) {
         let (data, _) = try await request("/lyric", query: [URLQueryItem(name: "id", value: String(id))])
         let dec = try JSONDecoder().decode(LyricResponse.self, from: data)

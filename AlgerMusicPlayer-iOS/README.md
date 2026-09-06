@@ -13,6 +13,7 @@
 - 🎵 播放：后台播放、锁屏与控制中心（MPRemoteCommandCenter）、AirPlay、倍速、播放模式（顺序/单曲/随机）
 - 📝 沉浸式歌词：逐行高亮、点击歌词跳转
 - 📚 音乐库：我喜欢的音乐、本地歌单（增删）、云端歌单（登录后同步）
+- 📥 离线下载：单曲可下载到本机，无网络也能播放（音乐库 → 已下载）
 - 🎨 主题（跟随系统/浅色/深色）、音质选择（标准/较高/极高/无损）
 - 📱 适配 iPhone 与 iPad：iPad 使用侧边栏分栏布局，支持多任务/横竖屏
 
@@ -63,6 +64,14 @@ npx @unblockneteasemusic/server
 在设置中填入你的部署地址即可。
 
 > 登录（手机号 + 密码）用于同步云端歌单；不登录也能正常搜索、播放、收藏。
+
+## GitHub Actions 自动构建未签名 IPA
+
+仓库已包含 `.github/workflows/build-unsigned-ipa.yml`：在 `ios` 分支推送或手动触发时，
+在 macOS runner 上用 XcodeGen 生成工程并以**未签名**（无 Provisioning Profile）方式构建，
+最终把 `AlgerMusicPlayer.app` 打包成 `AlgerMusicPlayer-unsigned.ipa` 作为 Artifact 上传。
+
+> 未签名的 IPA 不能直接安装，需用 AltStore / Sideloadly 等工具在本地重新签名后侧载到 iPhone/iPad。
 
 ## 工程结构
 

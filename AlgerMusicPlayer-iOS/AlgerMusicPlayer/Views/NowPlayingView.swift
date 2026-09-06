@@ -122,6 +122,14 @@ struct NowPlayingView: View {
                 Button { if let t = player.currentTrack { library.requestAdd(t) } } label: {
                     Image(systemName: "text.badge.plus")
                 }
+                Button {
+                    if let t = player.currentTrack {
+                        if library.isDownloaded(t.id) { library.deleteDownload(t.id) }
+                        else { Task { await library.download(t) } }
+                    }
+                } label: {
+                    Image(systemName: library.isDownloaded(player.currentTrack?.id ?? -1) ? "checkmark.circle.fill" : "arrow.down.circle")
+                }
             }
             .padding(.top, 4)
         }

@@ -23,6 +23,12 @@ struct TrackRow: View {
             Spacer()
             Text(track.duration.mmss).font(.caption).foregroundColor(.secondary)
                 .padding(.trailing, 4)
+            if library.downloadingIds.contains(track.id) {
+                ProgressView().scaleEffect(0.7).padding(.trailing, 2)
+            } else if library.isDownloaded(track.id) {
+                Image(systemName: "checkmark.circle.fill").font(.caption)
+                    .foregroundColor(.accentColor).padding(.trailing, 2)
+            }
             Image(systemName: "ellipsis")
                 .foregroundColor(.secondary)
                 .padding(8)
@@ -39,6 +45,11 @@ struct TrackRow: View {
                       systemImage: library.isFavorite(track.id) ? "heart.slash" : "heart")
             }
             Button { library.requestAdd(track) } label: { Label("加入歌单", systemImage: "text.badge.plus") }
+            if library.isDownloaded(track.id) {
+                Button { library.deleteDownload(track.id) } label: { Label("删除下载", systemImage: "trash") }
+            } else {
+                Button { Task { await library.download(track) } } label: { Label("下载", systemImage: "arrow.down.circle") }
+            }
         }
     }
 }

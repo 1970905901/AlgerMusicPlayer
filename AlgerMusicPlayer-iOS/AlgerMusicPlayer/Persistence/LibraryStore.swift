@@ -13,6 +13,8 @@ final class LibraryStore: ObservableObject {
 
     /// Track currently awaiting "add to playlist" selection (drives a sheet).
     @Published var pendingAddTrack: Track? = nil
+    @Published private(set) var downloaded: [StoredTrack] = []
+    @Published private(set) var downloadingIds: Set<Int> = []
 
     private let fm = FileManager.default
 
@@ -24,6 +26,12 @@ final class LibraryStore: ObservableObject {
     }
     private var favoriteFile: URL { directory.appendingPathComponent("favorites.json") }
     private var playlistFile: URL { directory.appendingPathComponent("playlists.json") }
+    private var downloadFile: URL { directory.appendingPathComponent("downloads.json") }
+    private var downloadsDir: URL {
+        let dir = directory.appendingPathComponent("downloads", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 
     private init() { load() }
 
@@ -35,6 +43,10 @@ final class LibraryStore: ObservableObject {
         if let d = try? Data(contentsOf: playlistFile),
            let arr = try? JSONDecoder().decode([LocalPlaylist].self, from: d) {
             playlists = arr
+        }
+        if let d = try? Data(contentsOf: downloadFile),
+           let arr = try? JSONDecoder().decode([StoredTrack].self, from: d) {
+            downloaded = arr
         }
     }
 
@@ -98,4 +110,42 @@ final class LibraryStore: ObservableObject {
     }
 
     func cancelAdd() { pendingAddTrack = nil }
+
+    // MARK: Downloads (offline)
+
+    func isDownloaded(_ id: Int) -> Bool { downloaded.contains { $0.id == id } }
+
+    func localPath(for id: Int) -> String? {
+        let p = downloadsDir.appendingPathComponent("\(id).mp3").path
+        return FileManager.default.fileExists(atPath: p) ? p : nil
+    }
+
+    func download(_ track: Track) async {
+        guard !isDownloaded(track.id) else { return }
+        await MainActor.run { downloadingIds.insert(track.id) }
+        do {
+            let data = try await NeteaseAPI.shared.download(id: track.id)
+            let url = downloadsDir.appendingPathComponent("\(track.id).mp3")
+            try data.write(to: url)
+            let stored = track.toStored(localFileURL: url.path)
+            await MainActor.run {
+                downloaded.insert(stored, at: 0)
+                saveDownloads()
+            }
+        } catch {
+            // download failures are non-fatal
+        }
+        await MainActor.run { downloadingIds.remove(track.id) }
+    }
+
+    func deleteDownload(_ id: Int) {
+        downloaded.removeAll { $0.id == id }
+        let url = downloadsDir.appendingPathComponent("\(id).mp3")
+        try? fm.removeItem(at: url)
+        saveDownloads()
+    }
+
+    private func saveDownloads() {
+        try? JSONEncoder().encode(downloaded).write(to: downloadFile)
+    }
 }

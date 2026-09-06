@@ -15,6 +15,13 @@ struct LibraryView: View {
             List {
                 Section {
                     NavigationLink {
+                        DownloadedView().environmentObject(player).environmentObject(library)
+                    } label: {
+                        Label("已下载", systemImage: "arrow.down.circle.fill").foregroundColor(.blue)
+                    }
+                }
+                Section {
+                    NavigationLink {
                         FavoritesView().environmentObject(player).environmentObject(library)
                     } label: {
                         Label("我喜欢的音乐", systemImage: "heart.fill").foregroundColor(.pink)
@@ -103,6 +110,38 @@ struct FavoritesView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { player.playQueue(library.favorites.map { $0.track }) } label: {
+                    Image(systemName: "play.fill")
+                }
+            }
+        }
+    }
+}
+
+struct DownloadedView: View {
+    @EnvironmentObject var player: PlayerManager
+    @EnvironmentObject var library: LibraryStore
+    var body: some View {
+        List {
+            if library.downloaded.isEmpty {
+                Text("还没有下载的歌曲").foregroundColor(.secondary)
+            }
+            ForEach(Array(library.downloaded.enumerated()), id: \.element.id) { i, t in
+                TrackRow(track: t.track, index: i + 1) {
+                    player.playQueue(library.downloaded.map { $0.track }, startAt: i)
+                }
+                .environmentObject(player)
+                .environmentObject(library)
+                .listRowSeparator(.hidden)
+                .swipeActions {
+                    Button(role: .destructive) { library.deleteDownload(t.id) } label: { Label("删除", systemImage: "trash") }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("已下载")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { player.playQueue(library.downloaded.map { $0.track }) } label: {
                     Image(systemName: "play.fill")
                 }
             }

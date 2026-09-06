@@ -92,6 +92,24 @@ final class PlayerManager: ObservableObject {
         lyricLines = []
         lyricLoadFailed = false
 
+        // Offline: play a previously downloaded file directly.
+        if let local = LibraryStore.shared.localPath(for: track.id) {
+            Task { [weak self] in
+                do {
+                    let (lrc, _) = try await NeteaseAPI.shared.lyric(id: track.id)
+                    await MainActor.run {
+                        self?.lyricLines = LyricsParser.parse(lrc)
+                        self?.lyricLoadFailed = lrc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                } catch {
+                    await MainActor.run { self?.lyricLines = []; self?.lyricLoadFailed = true }
+                }
+            }
+            startPlayback(url: URL(fileURLWithPath: local))
+            updateNowPlaying()
+            return
+        }
+
         // Resolve lyrics.
         Task { [weak self] in
             do {
