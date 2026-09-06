@@ -59,7 +59,7 @@ final class AppSettings: ObservableObject {
 
     private init() {
         let d = UserDefaults.standard
-        self.apiBaseURL = d.string(forKey: "apiBaseURL") ?? "https://music.alger.fun"
+        self.apiBaseURL = d.string(forKey: "apiBaseURL") ?? "https://music.163.com"
         self.audioQuality = AudioQuality(rawValue: d.string(forKey: "audioQuality") ?? "") ?? .standard
         self.themeMode = ThemeMode(rawValue: d.string(forKey: "themeMode") ?? "") ?? .system
         self.playbackRate = d.object(forKey: "playbackRate") as? Double ?? 1.0
