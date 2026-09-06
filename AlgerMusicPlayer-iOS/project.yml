@@ -1,0 +1,54 @@
+name: AlgerMusicPlayer
+options:
+  bundleIdPrefix: com.alger.music
+  deploymentTarget:
+    iOS: "16.5"
+  createIntermediateGroups: true
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.alger.music
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SUPPORTS_MACCATALYST: false
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.5"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_ACCENT_COLOR_NAME: AccentColor
+    ENABLE_PREVIEWS: true
+    DEAD_CODE_STRIPPING: true
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  Kingfisher:
+    url: https://github.com/onevcat/Kingfisher
+    from: 8.0.0
+targets:
+  AlgerMusicPlayer:
+    type: application
+    platform: iOS
+    sources:
+      - path: AlgerMusicPlayer
+    info:
+      properties:
+        UIBackgroundModes:
+          - audio
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleDisplayName: AlgerMusic
+        UILaunchScreen:
+          UILaunchScreenProperties:
+            UILaunchBackgroundColor: "#0B0B0F"
+        UIApplicationSupportsIndefiniteRemotePlayback: true
+    dependencies:
+      - package: Kingfisher
+        product: Kingfisher
