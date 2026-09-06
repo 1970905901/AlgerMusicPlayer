@@ -29,26 +29,30 @@ struct NeteaseAPI {
     }
 
     private var baseURL: String {
-        let raw = AppSettings.shared.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmed = raw.isEmpty ? "https://music.alger.fun" : raw
-        return trimmed.last == "/" ? String(trimmed.dropLast()) : trimmed
+        get async {
+            let raw = await AppSettings.shared.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = raw.isEmpty ? "https://music.alger.fun" : raw
+            return trimmed.last == "/" ? String(trimmed.dropLast()) : trimmed
+        }
     }
 
     private var cookieHeader: String? {
-        let c = AppSettings.shared.musicUCookie
-        return c.isEmpty ? nil : "MUSIC_U=\(c)"
+        get async {
+            let c = await AppSettings.shared.musicUCookie
+            return c.isEmpty ? nil : "MUSIC_U=\(c)"
+        }
     }
 
     private func request(_ path: String,
                          query: [URLQueryItem] = [],
                          method: String = "GET",
                          form: [String: String]? = nil) async throws -> (Data, HTTPURLResponse) {
-        guard let url = URL(string: baseURL + path)?.withQueries(query) else {
+        guard let url = URL(string: await baseURL + path)?.withQueries(query) else {
             throw APIError.invalidResponse
         }
         var req = URLRequest(url: url)
         req.httpMethod = method
-        if let c = cookieHeader { req.setValue(c, forHTTPHeaderField: "Cookie") }
+        if let c = await cookieHeader { req.setValue(c, forHTTPHeaderField: "Cookie") }
         if let form = form {
             req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             req.httpBody = form.map { "\($0.key)=\($0.value)" }
@@ -136,7 +140,7 @@ struct NeteaseAPI {
 
     /// Download the raw audio data for a track (used for offline playback).
     func download(id: Int) async throws -> Data {
-        guard let urlStr = try await songURL(id: id, level: AppSettings.shared.audioQuality.rawValue),
+        guard let urlStr = try await songURL(id: id, level: await AppSettings.shared.audioQuality.rawValue),
               let u = URL(string: urlStr) else { throw APIError.empty }
         let (data, _) = try await session.data(from: u)
         return data
@@ -191,13 +195,13 @@ struct NeteaseAPI {
         if let cookie = resp.allHeaderFields["Set-Cookie"] as? String {
             if let range = cookie.range(of: "MUSIC_U=([^;]+)", options: .regularExpression) {
                 let value = String(cookie[range]).replacingOccurrences(of: "MUSIC_U=", with: "")
-                AppSettings.shared.musicUCookie = value
+                await MainActor.run { AppSettings.shared.musicUCookie = value }
             }
         }
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let code = json["code"] as? Int {
             if code == 200, let acct = json["account"] as? [String: Any], let uid = acct["id"] as? Int {
-                AppSettings.shared.userId = uid
+                await MainActor.run { AppSettings.shared.userId = uid }
             }
             return code == 200
         }
