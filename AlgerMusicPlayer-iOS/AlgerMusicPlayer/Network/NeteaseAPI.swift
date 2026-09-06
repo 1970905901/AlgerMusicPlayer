@@ -162,7 +162,8 @@ struct NeteaseAPI {
             "buildver": String(Int(Date().timeIntervalSince1970)),
             "resolution": "1920x1080", "channel": ""
         ]
-        if let musicU = await AppSettings.shared.musicUCookie, !musicU.isEmpty { header["MUSIC_U"] = musicU }
+        let musicU = await AppSettings.shared.musicUCookie
+        if !musicU.isEmpty { header["MUSIC_U"] = musicU }
         body["header"] = header
         guard let json = try? JSONSerialization.data(withJSONObject: body),
               let url = URL(string: "https://interface.music.163.com/eapi\(path)") else {
